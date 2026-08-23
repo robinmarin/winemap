@@ -1,0 +1,213 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wine Map</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --surface-2: #f0efec;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #86857f;
+    --grid: #e4e3df;
+    --red: #2a78d6;
+    --white: #eb6834;
+    --other: #1baf7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --surface-2: #262624;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8a8980;
+      --grid: #333330;
+      --red: #3987e5;
+      --white: #d95926;
+      --other: #199e70;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-1); color: var(--text-primary);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; grid-template-columns: 1fr 320px; height: 100vh;
+  }
+  @media (max-width: 820px) { body { grid-template-columns: 1fr; height: auto; } }
+  main { position: relative; min-width: 0; display: flex; flex-direction: column; }
+  .panel { position: relative; flex: 1 1 62%; min-height: 0; }
+  .panel.small { flex: 1 1 38%; border-top: 1px solid var(--grid); }
+  .panel svg { display: block; width: 100%; height: 100%; }
+  .cap { position: absolute; top: 8px; left: 12px; font-size: 11px; color: var(--text-muted); }
+  aside {
+    border-left: 1px solid var(--grid); padding: 20px; overflow-y: auto;
+    background: var(--surface-2);
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+       color: var(--text-muted); margin: 20px 0 8px; font-weight: 600; }
+  p.sub { margin: 0 0 16px; color: var(--text-secondary); font-size: 13px; }
+  #search {
+    width: 100%; padding: 7px 10px; border: 1px solid var(--grid); border-radius: 6px;
+    background: var(--surface-1); color: var(--text-primary); font: inherit; font-size: 13px;
+  }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0 0; }
+  .legend span { display: flex; align-items: center; gap: 6px; font-size: 12px;
+                 color: var(--text-secondary); }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; }
+  circle { cursor: pointer; }
+  .axis-label { fill: var(--text-muted); font-size: 11px; }
+  .axis-line { stroke: var(--grid); stroke-width: 1; }
+  #tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); border: 1px solid var(--grid); border-radius: 6px;
+    padding: 7px 10px; font-size: 12px; box-shadow: 0 2px 10px rgb(0 0 0 / .12);
+    max-width: 220px;
+  }
+  #tip b { display: block; font-size: 13px; }
+  #tip span { color: var(--text-secondary); }
+  ol { margin: 0; padding-left: 0; list-style: none; counter-reset: n; }
+  ol li { counter-increment: n; padding: 7px 0; border-bottom: 1px solid var(--grid);
+          cursor: pointer; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+  ol li::before { content: counter(n); color: var(--text-muted); font-size: 11px;
+                  min-width: 12px; }
+  ol li em { font-style: normal; color: var(--text-secondary); font-size: 12px; }
+  .empty { color: var(--text-muted); font-size: 13px; }
+</style>
+
+<main>
+  <div class="panel"><svg id="plot"></svg><span class="cap">PC1 &times; PC2</span></div>
+  <div class="panel small"><svg id="plot3"></svg><span class="cap">PC1 &times; PC3 &mdash; weakest axis</span></div>
+  <div id="tip"></div>
+</main>
+
+<aside>
+  <h1>Wine style map</h1>
+  <p class="sub">511 grape&thinsp;&times;&thinsp;region styles, placed by what tasters
+    actually write about them. Close together&nbsp;= tastes alike.</p>
+  <input id="search" placeholder="Find a grape or region…" autocomplete="off">
+  <div class="legend">
+    <span><i class="swatch" style="background:var(--red)"></i>Red</span>
+    <span><i class="swatch" style="background:var(--white)"></i>White</span>
+    <span><i class="swatch" style="background:var(--other)"></i>Sparkling / rosé / fortified</span>
+  </div>
+  <div id="detail"><h2>Selection</h2><p class="empty">Click any point to see the
+    wines closest to it in style.</p></div>
+</aside>
+
+<script>
+const COLOUR = { red: "var(--red)", white: "var(--white)", other: "var(--other)" };
+const M = { top: 56, right: 48, bottom: 60, left: 48 };
+// Two panels share one selection: PC1 vs PC2, and PC1 vs PC3. The third
+// component is worth seeing but not worth a rotating cube -- it holds 4.3% of
+// the variance and is the one still carrying reviewer vocabulary.
+const PANELS = [
+  { id: "plot", xk: "x", yk: "y", xa: 0, ya: 1 },
+  { id: "plot3", xk: "x", yk: "z", xa: 0, ya: 2 },
+];
+let D, sel = null;
+
+const tip = document.getElementById("tip");
+
+fetch("map.json").then(r => r.json()).then(data => { D = data; draw(); });
+addEventListener("resize", () => D && draw());
+
+function draw() {
+  for (const panel of PANELS) drawPanel(panel);
+  if (sel !== null) select(sel);
+  filter();
+}
+
+function drawPanel(panel) {
+  const svg = document.getElementById(panel.id);
+  const w = svg.parentNode.clientWidth, h = svg.parentNode.clientHeight || 400;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("width", w); svg.setAttribute("height", h);
+
+  const xs = D.points.map(p => p[panel.xk]), ys = D.points.map(p => p[panel.yk]);
+  const sx = v => M.left + (v - Math.min(...xs)) / (Math.max(...xs) - Math.min(...xs)) * (w - M.left - M.right);
+  const sy = v => h - M.bottom - (v - Math.min(...ys)) / (Math.max(...ys) - Math.min(...ys)) * (h - M.top - M.bottom);
+  const r = n => 3 + Math.sqrt(n) / 9;
+
+  // Axis words come from the PCA loadings -- the axes mean whatever the tasters' words mean.
+  const ax = (a, i) => [a.positive.slice(0, 3).join(", "), a.negative.slice(0, 3).join(", ")][i];
+  svg.innerHTML = `
+    <line class="axis-line" x1="${M.left}" y1="${sy(0)}" x2="${w - M.right}" y2="${sy(0)}"/>
+    <line class="axis-line" x1="${sx(0)}" y1="${M.top}" x2="${sx(0)}" y2="${h - M.bottom}"/>
+    <text class="axis-label" x="${w - M.right}" y="${h - 16}" text-anchor="end">${ax(D.axes[panel.xa], 0)} &rarr;</text>
+    <text class="axis-label" x="${M.left}" y="${h - 16}">&larr; ${ax(D.axes[panel.xa], 1)}</text>
+    <text class="axis-label" x="${sx(0) + 8}" y="${M.top - 14}">&uarr; ${ax(D.axes[panel.ya], 0)}</text>
+    <text class="axis-label" x="${sx(0) + 8}" y="${h - M.bottom + 18}">&darr; ${ax(D.axes[panel.ya], 1)}</text>
+    <g id="links"></g><g id="dots"></g>`;
+
+  const dots = svg.querySelector("#dots");
+  panel.marks = D.points.map((p, i) => {
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", sx(p[panel.xk])); c.setAttribute("cy", sy(p[panel.yk]));
+    c.setAttribute("r", r(p.n)); c.setAttribute("fill", COLOUR[p.colour]);
+    // 2px surface ring keeps overlapping marks readable
+    c.setAttribute("stroke", "var(--surface-1)"); c.setAttribute("stroke-width", "1.5");
+    c.onmouseenter = e => showTip(e, p); c.onmouseleave = hideTip;
+    c.onclick = () => select(i);
+    dots.append(c);
+    return { el: c, p, cx: sx(p[panel.xk]), cy: sy(p[panel.yk]) };
+  });
+}
+
+function showTip(e, p) {
+  tip.innerHTML = `<b>${p.variety}</b><span>${p.province}, ${p.country}<br>
+    ${p.n} reviews · ${p.points} pts${p.price ? " · $" + p.price : ""}</span>`;
+  tip.style.opacity = 1;
+  const b = document.querySelector("main").getBoundingClientRect();
+  tip.style.left = Math.min(e.clientX - b.left + 12, b.width - 232) + "px";
+  const below = e.clientY - b.top + 12;
+  tip.style.top = (below + tip.offsetHeight > b.height ? below - tip.offsetHeight - 24 : below) + "px";
+}
+const hideTip = () => tip.style.opacity = 0;
+
+function select(i) {
+  sel = i;
+  const p = D.points[i];
+  for (const panel of PANELS) {
+    panel.marks.forEach((q, j) => {
+      const on = j === i || p.near.includes(j);
+      q.el.setAttribute("opacity", on ? 1 : 0.18);
+      q.el.setAttribute("stroke-width", j === i ? 2.5 : 1.5);
+      q.el.setAttribute("stroke", j === i ? "var(--text-primary)" : "var(--surface-1)");
+    });
+    const me = panel.marks[i];
+    document.getElementById(panel.id).querySelector("#links").innerHTML =
+      p.near.map(j => `<line x1="${me.cx}" y1="${me.cy}" x2="${panel.marks[j].cx}"
+        y2="${panel.marks[j].cy}" stroke="var(--text-muted)" stroke-width="1" opacity="0.4"/>`).join("");
+  }
+
+  document.getElementById("detail").innerHTML =
+    `<h2>If you like</h2>
+     <p style="margin:0 0 4px;font-size:15px"><b>${p.variety}</b><br>
+       <em style="font-style:normal;color:var(--text-secondary);font-size:13px">${p.province}, ${p.country}</em></p>
+     <h2>Try</h2>
+     <ol>${p.near.map(j => {
+       const q = D.points[j];
+       return `<li data-i="${j}"><span><b>${q.variety}</b><br><em>${q.province}${q.price ? " · $" + q.price : ""}</em></span></li>`;
+     }).join("")}</ol>`;
+  document.querySelectorAll("#detail li").forEach(li =>
+    li.onclick = () => select(+li.dataset.i));
+}
+
+function filter() {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  for (const panel of PANELS) {
+    if (!q) {
+      if (sel === null) panel.marks.forEach(x => x.el.setAttribute("opacity", 0.85));
+      continue;
+    }
+    document.getElementById(panel.id).querySelector("#links").innerHTML = "";
+    panel.marks.forEach(x => x.el.setAttribute("opacity",
+      (x.p.variety + " " + x.p.province).toLowerCase().includes(q) ? 1 : 0.08));
+  }
+  if (q) sel = null;
+}
+
+document.getElementById("search").oninput = filter;
+</script>
