@@ -74,6 +74,7 @@
                   min-width: 12px; }
   ol li em { font-style: normal; color: var(--text-secondary); font-size: 12px; }
   .empty { color: var(--text-muted); font-size: 13px; }
+  .caveat { color: var(--text-muted); font-size: 11px; margin-top: 16px; line-height: 1.45; }
 </style>
 
 <main>
@@ -94,6 +95,7 @@
   </div>
   <div id="detail"><h2>Selection</h2><p class="empty">Click any point to see the
     wines closest to it in style.</p></div>
+  <p class="caveat" id="caveat"></p>
 </aside>
 
 <script>
@@ -113,6 +115,13 @@ const tip = document.getElementById("tip");
 fetch("map.json").then(r => r.json()).then(data => {
   D = data;
   document.getElementById("count").textContent = D.points.length;
+  const shown = D.axes.slice(0, 3), pc = v => (v * 100).toFixed(1) + "%";
+  document.getElementById("caveat").innerHTML =
+    `Axes are principal components of the tasting-note vocabulary &mdash; the
+     panels hold ${pc(shown.reduce((t, a) => t + a.variance, 0))} of the
+     variance (${shown.map(a => pc(a.variance)).join(" / ")}). Recommendations
+     are computed in ${D.axes.length} dimensions, not from what you see here,
+     so neighbours need not look adjacent.`;
   draw();
 });
 addEventListener("resize", () => D && draw());
