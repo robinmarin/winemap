@@ -84,7 +84,7 @@
 
 <aside>
   <h1>Wine style map</h1>
-  <p class="sub">511 grape&thinsp;&times;&thinsp;region styles, placed by what tasters
+  <p class="sub"><span id="count">&hellip;</span> grape&thinsp;&times;&thinsp;region styles, placed by what tasters
     actually write about them. Close together&nbsp;= tastes alike.</p>
   <input id="search" placeholder="Find a grape or region…" autocomplete="off">
   <div class="legend">
@@ -110,7 +110,11 @@ let D, sel = null;
 
 const tip = document.getElementById("tip");
 
-fetch("map.json").then(r => r.json()).then(data => { D = data; draw(); });
+fetch("map.json").then(r => r.json()).then(data => {
+  D = data;
+  document.getElementById("count").textContent = D.points.length;
+  draw();
+});
 addEventListener("resize", () => D && draw());
 
 function draw() {

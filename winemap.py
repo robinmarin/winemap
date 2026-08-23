@@ -14,11 +14,14 @@ from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 
-MIN_REVIEWS = 40  # per (variety, province) cell
-# ponytail: 15 dims picked off a flat curve -- same-colour neighbour rate sits at
-# ~94% from 2 dims to 80, while same-province rises 6% -> 30%. Above ~10 dims
-# nothing moves. Revisit only with a real relevance measure (user ratings).
-N_DIMS = 15
+MIN_REVIEWS = 20  # per (variety, province) cell
+N_DIMS = 40       # dimensions used for neighbours; the map plots only the first 3
+
+# Terms used by many reviewers, not one. Swept against eval.py: the useful range
+# is a plateau from 0.15 to 0.20, falling away on both sides. What survives is
+# largely a sensory lexicon -- acidity, cherry, floral, lean, mocha, tannins --
+# arrived at from the data rather than typed by hand.
+MAX_SHARE = 0.16
 N_NEIGHBOURS = 6
 
 # Words that identify the wine rather than describe it -- they'd let the model
@@ -55,14 +58,10 @@ def load(paths):
     ).drop_nulls(["variety", "province", "description"])
 
 
-def descriptor_vocab(df, max_share=0.30, min_df=5):
-    """Keep only words that many reviewers use.
+def term_concentration(df, min_df=5):
+    """(terms, share) where share is the fraction of a term's use by one taster.
 
-    Wine Enthusiast assigns each region a regular taster, so their personal tics
-    ("doles", "luminous") look like regional style to PCA -- reviewer voice took
-    92% of PC3's spread before this filter. A real descriptor is used by everyone;
-    a tic is used by one person. So: pool one document per taster and drop any term
-    whose usage is concentrated in a single one.
+    Split out from descriptor_vocab so a threshold sweep pays for this once.
     """
     stop = NOISE + list(TfidfVectorizer(stop_words="english").get_stop_words()) + place_names(df)
     per_taster = (
@@ -73,8 +72,20 @@ def descriptor_vocab(df, max_share=0.30, min_df=5):
     cv = CountVectorizer(stop_words=stop, min_df=min_df, token_pattern=r"(?u)\b[a-zà-ÿ]{3,}\b")
     m = cv.fit_transform(per_taster["doc"].to_list()).toarray().astype(float)
     m /= m.sum(1, keepdims=True)  # tasters wrote wildly different volumes
-    share = m.max(0) / m.sum(0)   # 1.0 == only one taster ever writes this word
-    return sorted(np.array(cv.get_feature_names_out())[share <= max_share])
+    return np.array(cv.get_feature_names_out()), m.max(0) / m.sum(0)
+
+
+def descriptor_vocab(df, max_share=MAX_SHARE, min_df=5):
+    """Keep only words that many reviewers use.
+
+    Wine Enthusiast assigns each region a regular taster, so their personal tics
+    ("doles", "luminous") look like regional style to PCA -- reviewer voice took
+    92% of PC3's spread before this filter. A real descriptor is used by everyone;
+    a tic is used by one person. So: pool one document per taster and drop any term
+    whose usage is concentrated in a single one.
+    """
+    terms, share = term_concentration(df, min_df)
+    return sorted(terms[share <= max_share])
 
 
 def place_names(df):
