@@ -12,7 +12,7 @@ python3 winemap.py          # build map.json   (~30s)
 python3 eval.py             # score it
 python3 sweep.py            # sweep knobs against eval.py
 python3 winemap.py demo     # self-checks (also: eval.py demo)
-python3 -m http.server 8777 # map.html needs HTTP, not file://
+./serve.sh                  # map.html needs HTTP, not file:// (frees :8777 first)
 ```
 
 `data/*.parquet` and `map.json` are generated and untracked — see README for
