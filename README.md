@@ -19,7 +19,7 @@ for s in train test validation; do
 done
 
 python3 winemap.py                  # builds map.json  (~30s)
-python3 -m http.server 8777         # then open http://localhost:8777/map.html
+./serve.sh                          # then open http://localhost:8777/map.html
 ```
 
 Serve it over HTTP — the page fetches `map.json`, which browsers block on
